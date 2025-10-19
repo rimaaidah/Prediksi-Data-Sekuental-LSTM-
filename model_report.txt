@@ -1,0 +1,5 @@
+Window size: 30
+Train samples: 2893
+Test samples: 724
+Test RMSE: 2.4292
+Next day pred (°C): 13.3076

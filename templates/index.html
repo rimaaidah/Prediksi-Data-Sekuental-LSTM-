@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prediksi Suhu Harian — LSTM</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🌤️ Prediksi Suhu Minimum Harian — Melbourne</h1>
+      <p class="subtitle">Model LSTM • Daily Minimum Temperatures</p>
+    </header>
+
+    <!-- Halaman Awal -->
+    <section id="start-card" class="card center">
+      <h3>Mulai Prediksi</h3>
+      <p>Klik tombol di bawah untuk melihat hasil prediksi suhu harian.</p>
+      <button id="predict-btn" class="btn-primary">Prediksi Sekarang</button>
+    </section>
+
+    <!-- Hasil prediksi -->
+    <section id="result-card" class="hidden card">
+      <div class="card-grid">
+        <div>
+          <h3>Prediksi Hari Berikutnya</h3>
+          <p id="next-pred" class="big">— °C</p>
+          <p class="muted" id="next-date">—</p>
+        </div>
+        <div>
+          <h3 id="rmse-title" style="cursor:pointer;">RMSE (klik untuk info)</h3>
+          <p id="rmse" class="big">—</p>
+          <p class="muted">Root Mean Squared Error</p>
+        </div>
+      </div>
+      <div class="center" style="margin-top:20px;">
+        <button id="back-btn" class="btn-secondary">🔙 Kembali ke Awal</button>
+      </div>
+    </section>
+
+    <!-- Grafik Utama -->
+    <section id="chart-card" class="hidden card">
+      <canvas id="chartTemp"></canvas>
+    </section>
+
+    <!-- Grafik Tambahan: Suhu Rata-rata per Tahun -->
+    <section id="chart-year-card" class="hidden card">
+      <h3 class="center">📅 Rata-rata Suhu per Tahun</h3>
+      <p class="muted center">Klik titik tahun untuk melihat detail suhu rata-rata</p>
+      <canvas id="chartYear"></canvas>
+    </section>
+
+    <footer>
+      <p>Project TA-04 — Prediksi Suhu Harian dengan LSTM</p>
+    </footer>
+  </div>
+
+  <script>
+    const btn = document.getElementById('predict-btn');
+    const resultCard = document.getElementById('result-card');
+    const chartCard = document.getElementById('chart-card');
+    const chartYearCard = document.getElementById('chart-year-card');
+    const backBtn = document.getElementById('back-btn');
+    const startCard = document.getElementById('start-card');
+    const rmseTitle = document.getElementById('rmse-title');
+    let chartInstance = null;
+    let yearChart = null;
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      startCard.classList.add('hidden');
+
+      const resp = await fetch('/data');
+      const data = await resp.json();
+
+      resultCard.classList.remove('hidden');
+      chartCard.classList.remove('hidden');
+      chartYearCard.classList.remove('hidden');
+
+      document.getElementById('next-pred').innerText = data.next_value + " °C";
+      document.getElementById('next-date').innerText = data.next_date;
+      document.getElementById('rmse').innerText = data.rmse;
+
+      const ctx = document.getElementById('chartTemp');
+      const maxPoints = 400;
+      const n = data.dates.length;
+      const start = Math.max(0, n - maxPoints);
+      const slicedDates = data.dates.slice(start);
+      const slicedTemps = data.temps.slice(start);
+
+      const predSeries = new Array(slicedDates.length).fill(null);
+      const predMap = {};
+      data.pred_dates.forEach((d,i)=> predMap[d] = data.pred_values[i]);
+      for (let i=0; i<slicedDates.length; i++) {
+        const d = slicedDates[i].slice(0,10);
+        if (predMap[d] !== undefined) predSeries[i] = predMap[d];
+      }
+
+      if (chartInstance) chartInstance.destroy();
+
+      chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: slicedDates.map(d => d.slice(0,10)),
+          datasets: [
+            {
+              label: 'Suhu Aktual (°C)',
+              data: slicedTemps,
+              borderColor: '#2B7AE4',
+              borderWidth: 2,
+              tension: 0.3,
+              fill: false,
+              pointRadius: 0
+            },
+            {
+              label: 'Prediksi Model',
+              data: predSeries,
+              borderColor: '#FF7A59',
+              borderDash: [5,5],
+              borderWidth: 2,
+              tension: 0.3,
+              fill: false,
+              pointRadius: 0
+            }
+          ]
+        },
+        options: {
+          plugins: {
+            legend: { position: 'top' },
+            tooltip: { mode: 'index', intersect: false }
+          },
+          interaction: { mode: 'index', intersect: false },
+          scales: {
+            y: { title: { display: true, text: 'Temperature (°C)' } }
+          }
+        }
+      });
+
+
+      const yearlyData = {};
+      data.dates.forEach((d, i) => {
+        const year = d.slice(0,4);
+        if (!yearlyData[year]) yearlyData[year] = [];
+        yearlyData[year].push(data.temps[i]);
+      });
+
+      const years = Object.keys(yearlyData);
+      const avgTemps = years.map(y => {
+        const arr = yearlyData[y];
+        return arr.reduce((a,b)=>a+b,0)/arr.length;
+      });
+
+      const yearCtx = document.getElementById('chartYear');
+      if (yearChart) yearChart.destroy();
+
+      yearChart = new Chart(yearCtx, {
+        type: 'bar',
+        data: {
+          labels: years,
+          datasets: [{
+            label: 'Rata-rata Suhu Tahunan (°C)',
+            data: avgTemps,
+            backgroundColor: '#7BB8FF',
+            borderColor: '#2B7AE4',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          onClick: (evt, activeEls) => {
+            if (activeEls.length > 0) {
+              const idx = activeEls[0].index;
+              alert(`📅 Tahun: ${years[idx]}\n🌡️ Suhu Rata-rata: ${avgTemps[idx].toFixed(2)} °C`);
+            }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#2B7AE4',
+              titleColor: '#fff',
+              bodyColor: '#fff'
+            }
+          },
+          scales: {
+            y: { title: { display: true, text: 'Temperature (°C)' } },
+            x: { title: { display: true, text: 'Tahun' } }
+          }
+        }
+      });
+    });
+
+    rmseTitle.addEventListener('click', () => {
+      const rmseValue = document.getElementById('rmse').innerText;
+      alert(`📊 RMSE (Root Mean Squared Error): ${rmseValue}\nNilai ini menunjukkan seberapa jauh rata-rata prediksi model dari nilai aktual.\nSemakin kecil RMSE, semakin akurat model prediksi.`);
+    });
+
+    backBtn.addEventListener('click', () => {
+      resultCard.classList.add('hidden');
+      chartCard.classList.add('hidden');
+      chartYearCard.classList.add('hidden');
+      startCard.classList.remove('hidden');
+      btn.disabled = false;
+    });
+  </script>
+</body>
+</html>
